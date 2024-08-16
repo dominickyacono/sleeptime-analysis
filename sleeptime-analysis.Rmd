@@ -1,0 +1,520 @@
+---
+title: "The Causal Factors That Influence Sleep- Dominick Yacono"
+output:
+html_document:
+df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(MASS)
+library(glmnet)
+sleepdata <- read.csv("/Users/dominickyacono/Downloads/sleepdata.csv")
+
+sleepdataOriginal <- sleepdata
+```
+
+### Data and Problem Overview
+
+In this project, we will build linear regression models to observe the causal factors across species that influence hours of sleep.
+
+The data set `sleepdata.csv`  includes data on 51 different species from at least 13 different orders of mammals.
+Each case in the data set represents a species of mammal; values of the variables for each mammal
+are average of characteristic values for the species. 
+<!-- The data likely do not represent a random -->
+<!-- sample from the population of all mammal species. -->
+
+| Variable Name | Description |
+| ------------: | :-------------------------------------------------------------------- |
+| `species` | Species of mammal |
+| `TS` | Total sleep, hrs/day |
+| `BodyWt` | Body weight in kg |
+| `BrainWt` | Brain weight in g |
+| `Life` | Maximum life span, years |
+| `GP` | Gestation time, days |
+| `D` | Danger index, `D1` = relatively low danger from other animals, ..., `D5` = highest level of danger from other animals |
+
+
+### Exploratory Analysis
+
+First, let's explore how the response variable `TS` depends on the predictors `BodyWt`, `BrainWt`, `Life`, `GP` and `D`.
+
+Using scatter plots, we can observe whether `BodyWt`, `BrainWt`, `Life` and `GP` should be transformed to log 
+scale before building our regression models. 
+
+\
+
+Taking the logarithm of certain predictors can help adjust nonlinear relationships and make them more linear, which is easier to model using regression techniques. It can be helpful to transform either the predictor, the response, or both variables to the log scale to make them have a linear relationship. Let's transform the predictors to the natural log scale to see if we can create linearity.
+
+
+`BodyWt`:
+```{R}
+ggplot(data = sleepdata, aes(x = BodyWt, y = TS)) + geom_point() + labs(title = "No log transformation on `BodyWt`")
+```
+
+```{R}
+ggplot(data = sleepdata, aes(x = log(BodyWt), y = TS)) + geom_point() + labs(title = "log transformation on `BodyWt`") + geom_smooth(method="lm", se=F)
+```
+
+`BrainWt`
+```{R}
+ggplot(data = sleepdata, aes(x = BrainWt, y = TS)) + geom_point() + labs(title = "No log transformation on `BrainWt`")
+```
+
+```{R}
+ggplot(data = sleepdata, aes(x = log(BrainWt), y = TS)) + geom_point() + labs(title = "log transformation on `BrainWt`") + geom_smooth(method="lm", se=F)
+```
+
+`Life`
+```{R}
+ggplot(data = sleepdata, aes(x = Life, y = TS)) + geom_point() + labs(title = "No log transformation on `Life`")
+```
+
+```{R}
+ggplot(data = sleepdata, aes(x = log(Life), y = TS)) + geom_point() + labs(title = "log transformation on `Life`") + geom_smooth(method="lm", se=F)
+```
+
+`GP`:
+```{R}
+ggplot(data = sleepdata, aes(x = GP, y = TS)) + geom_point() + labs(title = "No log transformation on `GP`")
+```
+
+```{R}
+ggplot(data = sleepdata, aes(x = log(GP), y = TS)) + geom_point() + labs(title = "log transformation on `GP`") + geom_smooth(method="lm", se=F)
+```
+
+For the continuous predictors `BodyWt`, `BrainWt`, `Life` and `GP`, we see downward sloping linear trends between these predictors and `TS` once the predictors are put into log form. This is helpful for our linear model. It's also suggested to transform variables into log form when their set of values exceed one order of magnitude. `BodyWt`, `BrainWt`, `Life` and `GP` all have ranges of values exceeding one order of magnitude. Since we can observe linear trends between the log form of all the continuous predictors and `TS`, there is not much of a need to transform `TS` as well. Also, the values of `TS` do not exceed over one order of magnitude, so a log transformation of `TS` might not be necessarily helpful.
+
+\
+
+With that analysis out of they way, we will therefore use the natural logarithms`log(BodyWt)`, `log(BrainWt)`, `log(Life)` and `log(GP)` as the predictors instead of the original variables. 
+```{R}
+names(sleepdata)[names(sleepdata) == "BodyWt"] <- "ln(BodyWt)"
+names(sleepdata)[names(sleepdata) == "BrainWt"] <- "ln(BrainWt)"
+names(sleepdata)[names(sleepdata) == "Life"] <- "ln(Life)"
+names(sleepdata)[names(sleepdata) == "GP"] <- "ln(GP)"
+
+sleepdata$`ln(BodyWt)` = log(sleepdata$`ln(BodyWt)`)
+sleepdata$`ln(BrainWt)` = log(sleepdata$`ln(BrainWt)`)
+sleepdata$`ln(Life)` = log(sleepdata$`ln(Life)`)
+sleepdata$`ln(GP)` = log(sleepdata$`ln(GP)`)
+sleepdata
+```
+
+Next, we will use appropriate plots to explore the pairwise relationships between the response variable `TS` and the individual continuous predictors and between the individual continuous predictors themselves. Treating `D` as a categorical variable, we will use appropriate plots to explore the relationship between the response `TS` and `D`. 
+
+\
+Let's explore the relationships each individual predictor has with `TS`, and the relationships the continuous predictors have amongst themselves.
+
+Continuous Predictors:
+```{R}
+sleepdata_continuous <- sleepdata[,-c(7,7)]
+sleepdata_continuous <- sleepdata_continuous[,-c(1,1)]
+ggpairs(sleepdata_continuous)
+```
+
+The Categorical Predictor - `D`:
+```{R}
+boxplot(TS ~ D, data = sleepdata)
+``` 
+\
+
+Amongst the continuous predictors and the response variable, we see a variety of interesting relationships. `TS`, the response variable, is significantly negatively correlated with each one of the continuous predictors. We see negative correlations ranging from -.660 to -.420. There are number of relationships between the predictors themselves as well. `BodyWt` has significant positive correlation with all other continuous predictors. `log(BrainWt)` has significant positive correlation with all other continuous predictors. `log(Life)` has significant positive correlation with all other continuous predictors. `log(GP)` also has significant positive correlation with all other continuous predictors. In fact, all the continuous predictors are significantly positively correlated with one another. For the categorical variable `D`, we can see that as the danger level rises from `D1` to `D5`, there is a negative decreasing trend in `TS`. 
+
+###Understanding Adjusted Relationships
+
+We will consider the full model that uses main effects only for `log(BodyWt)`, `log(BrainWt)`, `log(Life)`, `log(GP)` and the categorical variable `D` to predict `TS`. 
+$$
+TS = \beta_0 + \beta_1ln(BodyWt) + \beta_2ln(BrainWt) + \beta_3ln(Life) + \beta_4ln(GP)  +  \beta_5U_{D2} +  \beta_6U_{D3} + \beta_7U_{D4} + \beta_8U_{D5} + e_i \\
+i = 1,...,n\\
+$$
+where $e_i$ is idependently identically distributed and follows the following distribution:
+$$
+N(0,\sigma^2)
+$$
+```{R}
+main_model <- lm(TS ~ log(BodyWt) + log(BrainWt) + log(Life) + log(GP) + D, data = sleepdataOriginal)
+sum <- summary(main_model)
+RSS.full = sum(resid(main_model)^2)
+
+coefficients <- sum$coefficients
+
+coefficients
+```
+
+First, let's analyze whether the categorical predictor `D` is useful in the full model. Perhaps the level of danger a mammal faces in the wild does not have a significant effect on time slept. Let's conduct the hypothesis test to assess this question.  
+
+The mean function for the full model: 
+$$
+E(TS|BodyWt_i, BrainWt_i, Life_i,GP_i,D_i ) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(BrainWt_i) + \beta_3ln(Life_i) + \beta_4ln(GP_i) + \beta_5U_{D2i} + \beta_6U_{D3i}  +  \beta_7U_{D4i} + \beta_{8}U_{D5i} 
+$$
+
+Hypothesis Test: \
+
+$H_0:$
+$$
+\beta_5 = \beta_6 = \beta_7 = \beta_8 = 0
+$$
+vs \
+
+$H_1:$ 
+at least one of 
+$$
+\beta_5, \beta_6, \beta_7, \beta_8 \ne 0
+$$
+Since we are examining whether the type of danger level,`D`, has a statistically significant impact on the value of `TS` with all other predictors considered, we must conduct an F-test and test whether the coefficients for $\beta_5,\beta_6,\beta_7,$ and $\beta_8$ are all zero. First, we build a reduced model without these coefficients.
+
+Reduced model:
+```{R}
+main_model_noD <- lm(TS ~ log(BodyWt) + log(BrainWt) + log(Life) + log(GP), data = sleepdataOriginal)
+summary(main_model_noD)
+RSS.reduced = sum(resid(main_model_noD)^2)
+RSS.reduced 
+```
+
+Then, we conduct the F-test and plug in information from our "full" and "reduced" models.
+
+F-stat:
+$$
+F = \frac{\frac{RSS_{red} - RSS_{full}}{df_{red} - df_{full}}}{\frac{RSS_{full}}{df_{full}}} \\
+F = \frac{\frac{562.526 - 314.5211}{46 - 42}}{\frac{314.5211}{42}} \\
+F = 8.28
+$$
+We find that out that the F-statistic is 8.28, which we can now use to calculate the p-value.
+
+P-value:
+```{R}
+pf(8.28, df1 = 46 - 42, df2 = 42, lower.tail = F)
+```
+
+The p-value, 5.110506e-05, is below 0.05. Therefore, we can reject the null hypothesis at the 95% confidence level that `D` has no effect on the model (95% confidence)
+
+The model with `D` takes into account a mammal's danger level index when it predicts the mammal's expected value of `TS`, alongside other factors. We can observe that mammal's with higher danger levels, like D5, are expected to have a lower value of `TS` compared to mammal's with lower danger levels (all other factors held constant and set to 0). For example, a mammal with danger level index D1 has an expected value of `TS` of 20.5578 (all other continuous factors at 0). On the other hand, a mammal with danger level index D5 has a lower expected value of `TS` of 13.4011 (all other continuous factors at 0). The model without `D` predicts that all mammals have an expected value of `TS` of 18.9662 (all other continuous factors at 0). Clearly, the model with `D` adds interesting insight not captured by the model without `D`. The result of the F-test informs us that the `D` predictor is valuable for our analysis. Some intersting observations are that in the model with `D`, we can see that the std. errors for the continuous predictors are lower than in the model without `D`. We can also see that the coefficients for D3, D4, and D5 are individually statistically significant when T-tests are conducted. 
+
+Leaving `D` in the model, let's describe the relationship between the predictors `log(BodyWt)` and
+`log(BrainWt)` and the response `TS` in the context of the MLR model with all predictors. 
+
+Using confidence intervals for our coefficeints, let's describe the relationship between the predictors and the response `TS`
+
+```{R}
+confint(main_model)
+```
+
+All other factors held constant, a one unit increase in `log(BodyWt)` is associated with an expected change in `TS` between (-0.8528798, 1.0552550) (95% confidence). Therefore, we can not say for certain whether `log(BodyWt)` has a definitive positive or negative effect on `TS`.
+
+All other factors held constant, a one unit increase in `log(BrainWt)` is associated with an expected change in `TS` between (-2.2347959, 0.6372426) (95% confidence). Therefore, we can not say for certain whether `log(BrainWt)` has a definitive positive or negative effect on `TS`.
+
+All other factors held constant, a one unit increase in `log(Life)` is associated with an expected change in `TS` between (-0.9445323, 2.0958053) (95% confidence). Therefore, we can not say for certain whether `log(BodyWt)` has a definitive positive or negative effect on `TS`.
+
+All other factors held constant, a one unit increase in `log(GP)` is associated with an expected change in `TS` between (-2.7799142,-0.1699266) (95% confidence). Therefore, we say it is likely `log(BrainWt)` has a negative effect on `TS`.
+
+In the pairwise plots, we saw that the correlation coefficient between `log(BodyWt)` and `TS` was around 0.6. We saw that the correlation coefficient between `log(BrainWt)` and `TS` was around 0.6 as well. These correlation coefficients imply that `log(BodyWt)` and `log(BrainWt)` share a positive linear relationship with `TS`. That is, an increase in either `log(BodyWt)` and `log(BrainWt)` lead to a increase in `TS`. However, it's important to mention that these correlation coefficients do not take into account other possible factors that might influence their relationship with `TS`. This is a very big difference between studying the pairwise plots versus the linear regression models. The pairwise plots suggest a very positive correlation between `log(BodyWt)` and `TS` (and `log(BrainWt)` and `TS`), but the main effects model takes into consideration other effects and suggests that `log(BodyWt)` and `log(BrainWt)` might actually have a negative relationship with `TS`, not a positive one. 
+
+### Model Search Methods
+
+Time to analyze a number of different regression models using the main effects for `log(BodyWt)`, `log(BrainWt)`, `log(Life)`, `log(GP)` and the variable `D`.
+
+I used both the AIC and BIC criterion to determine the best model. I wanted to see if the measures would suggest the same model. AIC and BIC both quantify the balance between model fit and model complexity. They prefer models that fit data values to a model surface adequetly while also not causing overfitting, which can happen if there is extreme model complexity. AIC/BIC returns a value for each model they analyze, and the model with the smallest value of AIC/BIC is preferred.
+
+I wanted to use both AIC and BIC since they do have differences. AIC prefers slightly more complex models than BIC. If both the criterions suggest the same model, then I can be more assured I have a good pick.
+
+Analyzing countless models can be difficult without a helpful algorithm. I used three guided search algorithms: foward selection, backward elimination, and stepwise regression. Forward selection starts by conducting the model criterion A(B)IC for the "null" model (just the intercept). It progresses to add variables and conduct the model criterion. If A(B)IC is larger for a model with an added regressor, it returns to the previous model. Backward elemination starts by conducting the model criterion A(B)IC for the "full" model (all regressors and intercept). It progresses to delete variables and conduct the model criterion. If A(B)IC is larger for a model with a deleted regressor, it returns to the previous model. Stepwise regression takes traits from both forward selection and backward elimination. It starts with any model, typically the null or full model. From there, it considers all possible models by adding or deleting a predictor. If the A(B)IC is larger for all these possible models, it returns to the current one and stops. If A(B)IC is smaller for one of these models, the algorithm updates the current best model with the new one and repeats the process.
+
+Forward selection, backward elimination, and stepwise regression settle on a model where the value for A(B)IC is at its smallest and no other model can provide a smaller value. Similar to my choice to use both AIC and BIC, I chose to conduct all three of these methods so that I could see if the algorithms suggest the same model. No one single algorithm is objectively correct, but multiple algorithms could point to a similar answer!
+
+```{R}
+null = lm(TS ~ 1, data = sleepdataOriginal)
+full = lm(TS ~ log(BodyWt) + log(BrainWt) + log(Life) + log(GP) + D, data = sleepdataOriginal)
+n = dim(sleepdataOriginal)[1]
+```
+
+Forward Selection by AIC
+```{R}
+stepAIC(null, scope = list(upper = full), direction = "forward", k = 2)
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Backward Elimination by AIC
+```{R}
+stepAIC(full, direction = "backward", k = 2)
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Stepwise Regression by AIC
+```{R}
+stepAIC(full, direction = "both", k = 2)
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Forward Selection by BIC
+```{R}
+stepAIC(null, scope = list(upper = full), direction = "forward", k = log(n))
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Backward Elimination by BIC
+```{R}
+stepAIC(full, direction = "backward", k = log(n))
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Stepwise Regression by BIC
+```{R}
+stepAIC(full, direction = "both", k = log(n))
+```
+
+Model chosen: $y_i = \beta_0 + \beta_1log(BrainWt_{i}) + \beta_2log(GP_{i}) + \beta_3U_{D2i} + \beta_4U_{D3i} + \beta_5U_{D4i} + \beta_6U_{D5i} + e_i$
+
+Interestingly, forward selection for AIC, backward elimination for AIC, stepwise regression for AIC, forward selection for BIC, backward elimination for BIC and stepwise regression for BIC all suggest the same model.
+
+The mean function for the suggested model:
+
+When `D` = D1
+$$
+E(TS| ln(BodyWt), ln(GP), D = D1) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(GP_i) 
+$$
+When `D` = D2
+$$
+E(TS| ln(BodyWt), ln(GP), D = D2) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(GP_i) + \beta_3
+$$
+When `D` = D3
+$$
+E(TS| ln(BodyWt), ln(GP), D = D3) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(GP_i) + \beta_4
+$$
+When `D` = D4
+$$
+E(TS| ln(BodyWt), ln(GP), D = D4) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(GP_i) +  \beta_5
+$$
+
+When `D` = D5
+$$
+E(TS| ln(BodyWt), ln(GP), D = D5) = \beta_0 + \beta_1ln(BodyWt_i) + \beta_2ln(GP_i) +  \beta_6
+$$
+
+### Model Checking
+
+We've now settled on using the model with main effects for `log(BrainWt)`, `log(GP)` and the categorical variable `D` to predict sleep time. Let's analyze how well fitted the model is and if it meets the assumptions that linear regression models should meet. 
+
+\
+Let's plot a residual plot, a histogram of the residuals, and a Q-Q plot to analyze:
+
+A central assumption is that the residuals have constant variance across the whole range of fitted values. The residual plot and the green regression line suggest that this assumption is met for the fitted values between 0 and 10. However, the spread of the residuals starts to slightly vary between the fitted value of 10 and 20. Therefore, the assumption of constant variance is mostly but not entirely met.
+```{R}
+#Residual plot
+
+residualInfo <- data.frame(Residuals = rstandard(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)), Fitted = fitted(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)))
+
+
+residualplot <- ggplot(residualInfo, aes(x = Fitted, y  = Residuals))+
+  geom_point(shape = 16, size = 3, color = "black") +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") + 
+  geom_smooth(method = "loess", color = "green", se = FALSE) +
+  labs(x = "Fitted Values", y = "Std. residuals") +
+  ggtitle("Residual Plot") 
+
+residualplot
+```
+
+Another central assumption is that the residuals are centered around 0. We can see in the residual histogram that the residuals indeed are centered around 0.
+```{R}
+#Hist plot 
+hist(resid(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)), xlab = "residuals", main = "Residual Histogram")
+# Calculate the mean of the residuals
+mean_resid <- mean(resid(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)))
+# Add a vertical line representing the mean
+abline(v = mean_resid, col = "red", lwd = 2)
+
+```
+
+One final assumption we make is that the residuals follow a normal distribution. We can see in the Q-Q plot that the residuals follow close to a normal distribution, but not a perfect one. There are some outlier residuals that deviate from normality in the tail ends of the residual distribution. We can say that this assumption is partly but not entirely met. 
+```{R}
+qqnorm(resid(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal))); qqline(resid(lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)))
+
+
+```
+
+### Model Summarization
+
+Let's summarize our fitted, final linear regression model
+
+Using the estimated regression coefficients, let's describe how the predictors `BrainWt` and
+`GP` (on their original scales) are related to sleep time for mammals when adjusting for the
+other variables in the model. 
+
+The estimated regression coefficients:
+
+```{R}
+finalModelLog = lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)
+sumfinalModelLog = summary(finalModelLog)
+sumfinalModelLog$coefficients
+```
+
+The coefficients reveal interesting insights on the effects of `BrainWt` and `GP` on `TS`. When adjusting for other variables in the model, a $x*100$ % increase in `BrainWt` leads to an expected  $-0.5319*x$ change in sleep time for mammals. Likewise, when adjusting for other variables in the model, a $x*100$ % increase in `GP` leads to an expected $-1.4219*x$ change in sleep time for mammals. 
+
+Let's also describe how increases in the danger level index for a mammal are related to sleep time:
+
+If a mammal has danger level index D2, then this leads to an expected decrease in total sleep by 2.165 hours compared to a mammal at level D1.
+If a mammal has danger level index D3, then this leads to an expected decrease in total sleep by 4.743 hours compared to a mammal at level D1.
+If a mammal has danger level index D4, then this leads to an expected decrease in total sleep by 3.294 hours compared to a mammal at level D1.
+If a mammal has danger level index D5, then this leads to an expected decrease in total sleep by 7.17 hours compared to a mammal at level D1.
+
+
+Now, let's make two effects plots: one for the predictor `BrainWt` (on its original scale) and one for the predictor 
+`GP` (on its original scale). Each plot displays five separate regression functions (one for each level of `D`). 
+
+```{R}
+finalModelLog = lm(TS ~ log(BrainWt) + log(GP) + D, data = sleepdataOriginal)
+finalModelOG = lm(TS ~ BrainWt + GP + D, data = sleepdataOriginal)
+```
+
+BrainWt effect plot:
+
+```{R}
+#plot for `BrainWt` 
+gsize = 1000
+
+newDatDD1 = data.frame(BrainWt = seq(from = min(sleepdataOriginal$BrainWt),
+to = max(sleepdataOriginal$BrainWt), length.out = gsize),
+GP = rep(mean(sleepdataOriginal$GP), gsize),
+D = rep("D1",gsize))
+
+newDatDD2 = data.frame(BrainWt = seq(from = min(sleepdataOriginal$BrainWt),
+to = max(sleepdataOriginal$BrainWt), length.out = gsize),
+GP = rep(mean(sleepdataOriginal$GP), gsize),
+D = rep("D2",gsize))
+
+newDatDD3 = data.frame(BrainWt = seq(from = min(sleepdataOriginal$BrainWt),
+to = max(sleepdataOriginal$BrainWt), length.out = gsize),
+GP = rep(mean(sleepdataOriginal$GP), gsize),
+D = rep("D3",gsize))
+
+newDatDD4 = data.frame(BrainWt = seq(from = min(sleepdataOriginal$BrainWt),
+to = max(sleepdataOriginal$BrainWt), length.out = gsize),
+GP = rep(mean(sleepdataOriginal$GP), gsize),
+D = rep("D4",gsize))
+
+newDatDD5 = data.frame(BrainWt = seq(from = min(sleepdataOriginal$BrainWt),
+to = max(sleepdataOriginal$BrainWt), length.out = gsize),
+GP = rep(mean(sleepdataOriginal$GP), gsize),
+D = rep("D5",gsize))
+
+eplotinfoDD1 = predict(finalModelLog, newdata = newDatDD1, interval = "confidence")
+eplotinfoDD2 = predict(finalModelLog, newdata = newDatDD2, interval = "confidence")
+eplotinfoDD3 = predict(finalModelLog, newdata = newDatDD3, interval = "confidence")
+eplotinfoDD4 = predict(finalModelLog, newdata = newDatDD4, interval = "confidence")
+eplotinfoDD5 = predict(finalModelLog, newdata = newDatDD5, interval = "confidence")
+
+# Combine the new dataframes
+newDatCombined = rbind(newDatDD1, newDatDD2, newDatDD3, newDatDD4, newDatDD5)
+eplotinfoCombined = rbind(eplotinfoDD1, eplotinfoDD2, eplotinfoDD3, eplotinfoDD4, eplotinfoDD5)
+
+BrainWtGraph = bind_cols(newDatCombined, eplotinfoCombined) 
+ggplot(BrainWtGraph, aes(x = BrainWt, y = fit)) + 
+  geom_line(data = filter(BrainWtGraph, D %in% "D1"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(BrainWtGraph, D %in% "D1"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(BrainWtGraph, D %in% "D2"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(BrainWtGraph, D %in% "D2"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) + 
+  geom_line(data = filter(BrainWtGraph, D %in% "D3"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(BrainWtGraph, D %in% "D3"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(BrainWtGraph, D %in% "D4"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(BrainWtGraph, D %in% "D4"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(BrainWtGraph, D %in% "D5"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(BrainWtGraph, D %in% "D5"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) + 
+  ggtitle("Effect plot for `BrainWt`")
+  
+```
+
+The effects plot for `BrainWt` reveals interesting information. The plot treats the mean function as a function of `TS` for a fixed value of `GP`. Here, the fixed value of `GP` is its sample average value, or the "typical" value. Therefore, the plot represents the adjusted effect of `BrainWt` when the other regressor is fixed at its "typical" values and the danger level, `D` is given. We can see that as `BrainWt` increases and `GP` is held fixed at its typical value, the expected value of `TS` exponentially decreases for any level of `D` The rate of decrease in `TS` is very high for changes in `BrainWt` across its lower domain of values, while the rate of decrease in `TS` is low for changes in `BrainWt` across its higher domain of values. The plot also reveals that mammals with lower danger index levels inherently have higher expected `TS` levels when `BrainWt` is 0 and `GP` is held at its fixed typical value.
+
+GP effect plot:
+
+```{R}
+#plot for `GP` 
+gsize = 1000
+
+newDatDD1 = data.frame(GP = seq(from = min(sleepdataOriginal$GP), 
+                       to = max(sleepdataOriginal$GP), length.out = gsize),
+                       BrainWt = rep(mean(sleepdataOriginal$BrainWt), gsize),
+                       D = rep("D1", gsize))
+
+newDatDD2 = data.frame(GP = seq(from = min(sleepdataOriginal$GP), 
+                       to = max(sleepdataOriginal$GP), length.out = gsize),
+                       BrainWt = rep(mean(sleepdataOriginal$BrainWt), gsize),
+                       D = rep("D2", gsize))
+
+newDatDD3 = data.frame(GP = seq(from = min(sleepdataOriginal$GP), 
+                       to = max(sleepdataOriginal$GP), length.out = gsize),
+                       BrainWt = rep(mean(sleepdataOriginal$BrainWt), gsize),
+                       D = rep("D3", gsize))
+
+newDatDD4 = data.frame(GP = seq(from = min(sleepdataOriginal$GP), 
+                       to = max(sleepdataOriginal$GP), length.out = gsize),
+                       BrainWt = rep(mean(sleepdataOriginal$BrainWt), gsize),
+                       D = rep("D4", gsize))
+
+newDatDD5 = data.frame(GP = seq(from = min(sleepdataOriginal$GP), 
+                       to = max(sleepdataOriginal$GP), length.out = gsize),
+                       BrainWt = rep(mean(sleepdataOriginal$BrainWt), gsize),
+                       D = rep("D5", gsize))
+
+eplotinfoDD1 = predict(finalModelLog, newdata = newDatDD1, interval = "confidence")
+eplotinfoDD2 = predict(finalModelLog, newdata = newDatDD2, interval = "confidence")
+eplotinfoDD3 = predict(finalModelLog, newdata = newDatDD3, interval = "confidence")
+eplotinfoDD4 = predict(finalModelLog, newdata = newDatDD4, interval = "confidence")
+eplotinfoDD5 = predict(finalModelLog, newdata = newDatDD5, interval = "confidence")
+
+# Combine the new dataframes
+newDatCombined = rbind(newDatDD1, newDatDD2, newDatDD3, newDatDD4, newDatDD5)
+eplotinfoCombined = rbind(eplotinfoDD1, eplotinfoDD2, eplotinfoDD3, eplotinfoDD4, eplotinfoDD5)
+
+GPGraph = bind_cols(newDatCombined, eplotinfoCombined) 
+ggplot(GPGraph, aes(x = GP, y = fit)) + 
+  geom_line(data = filter(GPGraph, D %in% "D1"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(GPGraph, D %in% "D1"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(GPGraph, D %in% "D2"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(GPGraph, D %in% "D2"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) + 
+  geom_line(data = filter(GPGraph, D %in% "D3"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(GPGraph, D %in% "D3"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(GPGraph, D %in% "D4"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(GPGraph, D %in% "D4"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  geom_line(data = filter(GPGraph, D %in% "D5"),aes(y = fit, color = D)) +
+  geom_ribbon(data = filter(GPGraph, D %in% "D5"), aes(ymin = lwr, ymax = upr, fill = D), alpha = 0.2) +
+  ggtitle("Effect plot for `GP`")
+  
+
+```
+
+The effects plot for `GP` reveals interesting information as well. The plot treats the mean function as a function of `TS` for a fixed value of `BrainWt`. Here, the fixed value of `BrainWt` is its sample average value, or the "typical" value. Therefore, the plot represents the adjusted effect of `GP` when the other regressor is fixed at its "typical" values and the danger level, `D` is given. We can see that as `GP` increases and `BrainWt` is held fixed at its typical value, the expected value of `TS` exponentially decreases for any level of `D` The rate of decrease in `TS` is very high for changes in `GP` across its lower domain of values, while the rate of decrease in `TS` is low for changes in `GP` across its higher domain of values. The plot also reveals that mammals with lower danger index levels inherently have lower expected `TS` levels when `GP` is 0 and `BrainWt` is held at its fixed typical value.
+
+### A Brief Continuation: Ridge Regression Model
+
+Lastly, we will create a Ridge Regression model using the final fitted model we just settled with. It is very similar to the traditional linear regression method, but with a slight difference. It corrects for overfitting on the training data by targeting multicollinearity. As we observed in the pairplots, there is high positive and negative correlation across the factors. This correlation can create multicollinearity, and it is a good idea to regularize out model to take this into account. What results is a model with less variance, meaning that unnecessary noise and information is filtered out.
+
+Ridge Regression modifies ordinary least squares by adding a regularization term to the equation that determines coefficients $\beta$.
+The traditional equation for linear regression: $\hat\beta_R = (X^TX)^{-1}X^Ty$
+The new coefficients are given by: $\hat\beta_R = (X^TX + \lambda I)^{-1}X^Ty$
+
+This penalty term, $\lambda I$, counteracts high $\beta$ coefficients. This can be called coefficient shrinkage. The penalty term is added to the diagonals in the $X^TX$ matrix, increasing the determinant away from 0. If the determinant of $X^TX$ is close to 0, it is considered near-singular. This means that the $\beta$ coefficients estimates from the matrix are highly inaccurate. By moving the determinant away from 0, the penalty term shrinks the predictor's effect on the predicted value. This helps counteract multicollinearity and overfitting of the data. 
+
+Through the addition of the penalty term, higher $\beta$ coefficients are reduced greater than smaller coefficients. The coefficients are brought closer to 0, reducing their overall effect on the outcome. A consequence of this is that the coefficients are not easy for us to interpet. Our model might more accurately predict the total sleep types of mammals get thanks to lower variance, but the results are not as easy to interpret.
+
+The following code creates 2 ridge regression models of importance to us:
+```{R}
+X <- model.matrix(finalModelLog)
+y <- model.response(model.frame(finalModelLog))
+
+ridge_model <- cv.glmnet(X, y, alpha = 0)
+ridge_model
+```
+The first model, indicated by "min", represents the model that gives the lowest mean square error, indicated by "measure". \\
+The second model, indicated by "lse", represents the model that is slightly more regularized, indicated by "lambda", but still within one standard error of the minimum MSE.
+
+Now, we have three models! One least squares regression model, and two models that utilize ridge regression.
+
